@@ -1,0 +1,13 @@
+{
+    "brands": [
+        {
+            "brand": "CALVIN KLEIN",
+            "code": "KC",
+            "glasses_type": [
+                "Sunglasses",
+                "Eyeglasses"
+            ]
+        }
+    ]
+}
+
