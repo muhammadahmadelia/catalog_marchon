@@ -421,21 +421,6 @@ class MyMarchon_Scraper:
         try:
             json_products = []
             for product in products:
-                json_varinats = []
-                for index, variant in enumerate(product.variants):
-                    json_varinat = {
-                        'position': (index + 1), 
-                        'title': variant.title, 
-                        'sku': variant.sku, 
-                        'inventory_quantity': variant.inventory_quantity,
-                        'found_status': variant.found_status,
-                        'listing_price': variant.listing_price, 
-                        'wholesale_price': variant.wholesale_price,
-                        'barcode_or_gtin': variant.barcode_or_gtin,
-                        'size': variant.size,
-                        'weight': variant.weight
-                    }
-                    json_varinats.append(json_varinat)
                 json_product = {
                     'brand': product.brand, 
                     'number': product.number, 
@@ -446,20 +431,34 @@ class MyMarchon_Scraper:
                     'lens_color': product.lens_color, 
                     'status': product.status, 
                     'type': product.type, 
-                    'url': product.url, 
-                    'metafields': [
-                        { 'key': 'for_who', 'value': product.metafields.for_who },
-                        { 'key': 'product_size', 'value': product.metafields.product_size }, 
-                        { 'key': 'lens_material', 'value': product.metafields.lens_material }, 
-                        { 'key': 'lens_technology', 'value': product.metafields.lens_technology }, 
-                        { 'key': 'frame_material', 'value': product.metafields.frame_material }, 
-                        { 'key': 'frame_shape', 'value': product.metafields.frame_shape },
-                        { 'key': 'gtin1', 'value': product.metafields.gtin1 }, 
-                        { 'key': 'img_url', 'value': product.metafields.img_url },
-                        { 'key': 'fitting_info', 'value': product.metafields.fitting_info },
-                        { 'key': 'img_360_urls', 'value': product.metafields.img_360_urls }
-                    ],
-                    'variants': json_varinats
+                    'url': product.url,
+                    'metafields': {
+                        'for_who': product.metafields.for_who,
+                        'product_size': product.metafields.product_size,
+                        'lens_material': product.metafields.lens_material,
+                        'lens_technology': product.metafields.lens_technology,
+                        'frame_material': product.metafields.frame_material,
+                        'frame_shape': product.metafields.frame_shape,
+                        'gtin1': product.metafields.gtin1,
+                        'img_url': product.metafields.img_url,
+                        'fitting_info': product.metafields.fitting_info,
+                        'img_360_urls': product.metafields.img_360_urls
+                    },
+                    'variants': [
+                        { 
+                            'position': (index + 1), 
+                            'title': variant.title, 
+                            'sku': variant.sku, 
+                            'inventory_quantity': variant.inventory_quantity, 
+                            'found_status': variant.found_status, 
+                            'listing_price': variant.listing_price, 
+                            'wholesale_price': variant.wholesale_price, 
+                            'barcode_or_gtin': variant.barcode_or_gtin, 
+                            'size': variant.size, 
+                            'weight': variant.weight 
+                        } 
+                        for index, variant in enumerate(product.variants)
+                    ]
                 }
                 json_products.append(json_product)
             
@@ -498,78 +497,73 @@ class MyMarchon_Scraper:
         if iteration == total: 
             print()
 
+def printProgressBar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r") -> None:
+        """
+        Call in a loop to create terminal progress bar
+        @params:
+            iteration   - Required  : current iteration (Int)
+            total       - Required  : total iterations (Int)
+            prefix      - Optional  : prefix string (Str)
+            suffix      - Optional  : suffix string (Str)
+            decimals    - Optional  : positive number of decimals in percent complete (Int)
+            length      - Optional  : character length of bar (Int)
+            fill        - Optional  : bar fill character (Str)
+            printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
+        """
+        percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+        filledLength = int(length * iteration // total)
+        bar = fill * filledLength + '-' * (length - filledLength)
+        print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
+        # Print New Line on Complete
+        if iteration == total: 
+            print()
 
+def read_file(filename: str):
+    f = open(filename)
+    data = f.read()
+    f.close()
+    return data
 
 def read_data_from_json_file(DEBUG, result_filename: str):
     data = []
     try:
+        print('Downloading images...')
+        
         files = glob.glob(result_filename)
         if files:
-            f = open(files[-1])
-            json_data = json.loads(f.read())
-            products = []
+            json_data = json.loads(read_file(files[-1]))
+            if json_data: printProgressBar(0, len(json_data), prefix = 'Progress:', suffix = 'Complete', length = 50)
 
-            for json_d in json_data:
-                number, frame_code, brand, img_url, frame_color, lens_color = '', '', '', '', '', ''
-                fitting_info = ''
-                # product = Product()
-                brand = json_d['brand']
-                number = str(json_d['number']).strip().upper()
-                if '/' in number: number = number.replace('/', '-').strip()
-                # product.name = str(json_d['name']).strip().upper()
-                frame_code = str(json_d['frame_code']).strip().upper()
-                if '/' in frame_code: frame_code = frame_code.replace('/', '-').strip()
-                frame_color = str(json_d['frame_color']).strip().title()
-                # lens_code = str(json_d['lens_code']).strip().upper()
-                lens_color = str(json_d['lens_color']).strip().title()
-                # product.status = str(json_d['status']).strip().lower()
-                # product.type = str(json_d['type']).strip().title()
-                # product.url = str(json_d['url']).strip()
-                # metafields = Metafields()
+            for index, json_d in enumerate(json_data):
+                brand = json_d.get('brand') if 'brand' in json_d else ''
                 
-                for json_metafiels in json_d['metafields']:
-                    # if json_metafiels['key'] == 'for_who':metafields.for_who = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'product_size':metafields.product_size = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'activity':metafields.activity = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'lens_material':metafields.lens_material = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'graduabile':metafields.graduabile = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'interest':metafields.interest = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'lens_technology':metafields.lens_technology = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'frame_material':metafields.frame_material = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'frame_shape':metafields.frame_shape = str(json_metafiels['value']).strip().title()
-                    # elif json_metafiels['key'] == 'gtin1':metafields.gtin1 = str(json_metafiels['value']).strip().title()
-                    if json_metafiels['key'] == 'img_url':img_url = str(json_metafiels['value']).strip()
-                    if json_metafiels['key'] == 'fitting_info': fitting_info = str(json_metafiels['value']).strip()
-                    # elif json_metafiels['key'] == 'img_360_urls':
-                    #     value = str(json_metafiels['value']).strip()
-                    #     if '[' in value: value = str(value).replace('[', '').strip()
-                    #     if ']' in value: value = str(value).replace(']', '').strip()
-                    #     if "'" in value: value = str(value).replace("'", '').strip()
-                    #     for v in value.split(','):
-                    #         metafields.img_360_urls = str(v).strip()
-                # product.metafields = metafields
-                for json_variant in json_d['variants']:
-                    sku, price = '', ''
-                    # variant = Variant()
-                    # variant.position = json_variant['position']
-                    # variant.title = str(json_variant['title']).strip()
-                    sku = str(json_variant['sku']).strip().upper()
+                number = str(json_d.get('number')).strip().upper() if 'number' in json_d else ''
+                if '/' in number: number = number.replace('/', '-').strip()
+                
+                frame_code = str(json_d.get('frame_code')).strip().upper() if 'frame_code' in json_d else ''
+                if '/' in frame_code: frame_code = frame_code.replace('/', '-').strip()
+
+                frame_color = str(json_d.get('frame_color')).strip().title() if 'frame_color' in json_d else ''
+                # lens_color = str(json_d['lens_color']).strip().title() if 'lens_color' in json_d else ''
+                
+                img_url = str(json_d.get('metafields').get('img_url')).strip() if 'img_url' in json_d.get('metafields') else ''
+                # fitting_info = str(json_d.get('metafields').get('fitting_info')).strip() if 'fitting_info' in json_d.get('metafields') else ''
+                for json_variant in json_d.get('variants', []):
+                    sku = str(json_variant.get('sku')).strip().upper()
                     if '/' in sku: sku = sku.replace('/', '-').strip()
-                    # variant.inventory_quantity = json_variant['inventory_quantity']
-                    # variant.found_status = json_variant['found_status']
-                    wholesale_price = str(json_variant['wholesale_price']).strip()
-                    listing_price = str(json_variant['listing_price']).strip()
-                    barcode_or_gtin = str(json_variant['barcode_or_gtin']).strip()
-                    # variant.size = str(json_variant['size']).strip()
-                    # variant.weight = str(json_variant['weight']).strip()
-                    # product.variants = variant
+                    wholesale_price = str(json_variant.get('wholesale_price')).strip()
+                    listing_price = str(json_variant.get('listing_price')).strip()
+                    barcode_or_gtin = str(json_variant.get('barcode_or_gtin')).strip()
+
                     image_filename = f'Images/{sku}.jpg'
                     if not os.path.exists(image_filename): 
                         image_attachment = download_image(img_url)
                         if image_attachment:
                             with open(image_filename, 'wb') as f: f.write(image_attachment)
                             crop_downloaded_image(f'Images/{sku}.jpg')
-                    data.append([number, frame_code, frame_color, lens_color, brand, sku, wholesale_price, listing_price, barcode_or_gtin, fitting_info])
+                    data.append([number, frame_code, frame_color, brand, sku, wholesale_price, listing_price, barcode_or_gtin])
+
+                printProgressBar(index + 1, len(json_data), prefix = 'Progress:', suffix = 'Complete', length = 50)
     except Exception as e:
         if DEBUG: print(f'Exception in read_data_from_json_file: {e}')
         else: pass
@@ -623,21 +617,19 @@ def crop_downloaded_image(filename):
             im.save(filename)
     except Exception as e: print(f'Exception in crop_downloaded_image: {e}')
 
-def saving_picture_in_excel(data: list):
+def saving_picture_in_excel(data: list, excel_results_filename: str):
     workbook = Workbook()
     worksheet = workbook.active
 
     worksheet.cell(row=1, column=1, value='Model Code')
     worksheet.cell(row=1, column=2, value='Lens Code')
     worksheet.cell(row=1, column=3, value='Color Frame')
-    worksheet.cell(row=1, column=4, value='Color Lens')
-    worksheet.cell(row=1, column=5, value='Brand')
-    worksheet.cell(row=1, column=6, value='SKU')
-    worksheet.cell(row=1, column=7, value='Wholesale Price')
-    worksheet.cell(row=1, column=8, value='Listing Price')
-    worksheet.cell(row=1, column=9, value="UPC")
-    worksheet.cell(row=1, column=10, value="Fitting Info")
-    worksheet.cell(row=1, column=11, value="Image")
+    worksheet.cell(row=1, column=4, value='Brand')
+    worksheet.cell(row=1, column=5, value='SKU')
+    worksheet.cell(row=1, column=6, value='Wholesale Price')
+    worksheet.cell(row=1, column=7, value='Listing Price')
+    worksheet.cell(row=1, column=8, value="UPC")
+    worksheet.cell(row=1, column=9, value="Image")
 
     for index, d in enumerate(data):
         new_index = index + 2
@@ -650,77 +642,75 @@ def saving_picture_in_excel(data: list):
         worksheet.cell(row=new_index, column=6, value=d[5])
         worksheet.cell(row=new_index, column=7, value=d[6])
         worksheet.cell(row=new_index, column=8, value=d[7])
-        worksheet.cell(row=new_index, column=9, value=d[8])
-        worksheet.cell(row=new_index, column=10, value=d[9])
 
-        image = f'Images/{d[-5]}.jpg'
+        image = f'Images/{d[-4]}.jpg'
         if os.path.exists(image):
             im = Image.open(image)
             width, height = im.size
             worksheet.row_dimensions[new_index].height = height
-            worksheet.add_image(Imag(image), anchor='K'+str(new_index))
-            # col_letter = get_column_letter(9)
-            # worksheet.column_dimensions[col_letter].width = width
-        # print(index, image)
+            worksheet.add_image(Imag(image), anchor='I'+str(new_index))
 
-    workbook.save('MyMarchon Results.xlsx')
+    workbook.save(excel_results_filename)
 
 DEBUG = True
 try:
     pathofpyfolder = os.path.realpath(sys.argv[0])
     # get path of Exe folder
     path = pathofpyfolder.replace(pathofpyfolder.split('\\')[-1], '')
-    # download chromedriver.exe with same version and get its path
-    # if os.path.exists('chromedriver.exe'): os.remove('chromedriver.exe')
-    if os.path.exists('MyMarchon Results.xlsx'): os.remove('MyMarchon Results.xlsx')
-
-    # chromedriver_autoinstaller.install(path)
     if '.exe' in pathofpyfolder.split('\\')[-1]: DEBUG = False
-    
-    f = open('MyMarchon start.json')
-    json_data = json.loads(f.read())
-    f.close()
 
-    brands = json_data['brands']
+    chrome_path = ChromeDriverManager().install()
+    if 'chromedriver.exe' not in chrome_path:
+        chrome_path = str(chrome_path).split('/')[0].strip()
+        chrome_path = f'{chrome_path}\\chromedriver.exe'
 
-    
-    f = open('requirements/myMarchon.json')
-    data = json.loads(f.read())
-    f.close()
-
-    store = Store()
-    store.link = data['url']
-    store.username = data['username']
-    store.password = data['password']
-    store.login_flag = True
-
-    result_filename = 'requirements/MyMarchon Results.json'
-    if os.path.exists(result_filename): os.remove(result_filename)
-
+    # create directories
+    if not os.path.exists('requirements'): os.makedirs('requirements')
     if not os.path.exists('Logs'): os.makedirs('Logs')
-
+    if not os.path.exists('Images'): os.makedirs('Images')
+    
+    start_json_filename = 'Start.json'
+    credentails_filename = 'requirements/credentails.json'
+    json_results_filename = 'requirements/json_results.json'
+    excel_results_filename = 'Results.xlsx'
+    
+    # remove old files
+    if os.path.exists(json_results_filename): os.remove(json_results_filename)
+    if os.path.exists(excel_results_filename): os.remove(excel_results_filename)
     log_files = glob.glob('Logs/*.txt')
     if len(log_files) > 5:
         oldest_file = min(log_files, key=os.path.getctime)
         os.remove(oldest_file)
         log_files = glob.glob('Logs/*.txt')
-
-    scrape_time = datetime.now().strftime('%d-%m-%Y %H-%M-%S')
-    logs_filename = f'Logs/Logs {scrape_time}.txt'
-
-    chrome_path = ''
-    if not chrome_path:
-        chrome_path = ChromeDriverManager().install()
-        if 'chromedriver.exe' not in chrome_path:
-            chrome_path = str(chrome_path).split('/')[0].strip()
-            chrome_path = f'{chrome_path}\\chromedriver.exe'
-    
-    MyMarchon_Scraper(DEBUG, result_filename, logs_filename, chrome_path).controller(store, brands)
-    
     for filename in glob.glob('Images/*'): os.remove(filename)
-    data = read_data_from_json_file(DEBUG, result_filename)
+
+
+    if os.path.exists(start_json_filename):
+        json_data = json.loads(read_file(start_json_filename))
+        
+        if 'brands' in json_data:
+            brands = json_data.get('brands')
+
+            if os.path.exists(credentails_filename):
+                credentails_json_data = json.loads(read_file(credentails_filename))
+
+                store = Store()
+                store.link = credentails_json_data.get('url')
+                store.username = credentails_json_data.get('username')
+                store.password = credentails_json_data.get('password')
+                store.login_flag = True
+
+                scrape_time = datetime.now().strftime('%d-%m-%Y %H-%M-%S')
+                logs_filename = f'Logs/Logs {scrape_time}.txt'
+
+                MyMarchon_Scraper(DEBUG, json_results_filename, logs_filename, chrome_path).controller(store, brands)
+                
+                data = read_data_from_json_file(DEBUG, json_results_filename)
+                
+                saving_picture_in_excel(data, excel_results_filename)
+
+            else: print(f'No {credentails_filename} file found')
+        else: print(f'No brands found in {start_json_filename} file')
+    else: print(f'No {start_json_filename} file found')
     
-    saving_picture_in_excel(data)
-except Exception as e:
-    if DEBUG: print('Exception: '+str(e))
-    else: pass
+except Exception as e: print('Exception: '+str(e))
