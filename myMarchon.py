@@ -1,10 +1,8 @@
-import re
 import os
 import sys
 import json
 import random
 from time import sleep
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -17,7 +15,6 @@ from models.metafields import Metafields
 import glob
 import requests
 from datetime import datetime
-from lxml import html
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as Imag
 from PIL import Image
@@ -25,8 +22,11 @@ from PIL import Image
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 
+from seleniumwire import webdriver
+
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 
 class MyMarchon_Scraper:
@@ -46,7 +46,7 @@ class MyMarchon_Scraper:
 
     def controller(self, store: Store, brands_with_types: list[dict]) -> None:
         try:
-            cookies: dict = dict()
+            
             self.initiate_browser(store)
 
             if self.login(store.username, store.password):
@@ -55,17 +55,21 @@ class MyMarchon_Scraper:
                     for brand_with_type in brands_with_types:
                         brand: str = brand_with_type['brand']
                         brand_code: str = str(brand_with_type['code']).strip()
+                        
                         print(f'Brand: {brand}')
                         self.print_logs(f'Brand: {brand}')
 
-                        brand_url = self.get_brand_url(brand)
-                        user_data = self.get_user_data()
+                        brand_url = self.get_brand_url(brand_code)
+                        print(f'Brand URL: {brand_url}')
+                        self.print_logs(f'Brand URL: {brand_url}')
+
+                        auth_token = self.get_authorization_token()
+
                         
-                        if brand_url:
-                            if not cookies: cookies = self.get_cookies()
-                            headers = self.get_api_headers(cookies)
-                        
-                            brand_products_data = self.get_brand_products(brand_code, user_data, cookies, headers)
+                        if auth_token:
+                            headers = self.get_api_headers(auth_token)
+                            user_data = self.get_user_data(auth_token, store.username, headers)
+                            brand_products_data = self.get_brand_products(brand_code, auth_token, headers, user_data)
                             for glasses_type in brand_with_type['glasses_type']:
                                 start_time = datetime.now()
 
@@ -83,7 +87,7 @@ class MyMarchon_Scraper:
                                     self.printProgressBar(scraped_products, total_products, prefix = 'Progress:', suffix = 'Complete', length = 50)
 
                                 for style_name in all_products:
-                                    self.scrape_product(style_name, brand, glasses_type, user_data, cookies, headers)
+                                    self.scrape_product(style_name, brand, glasses_type, auth_token, headers, user_data)
                                     self.save_to_json(self.data)
                                     scraped_products += 1
                                     if total_products and int(total_products) > 0:
@@ -127,25 +131,18 @@ class MyMarchon_Scraper:
         login_flag = False
         try:
             while not login_flag:
-                if self.wait_until_element_found(50, 'xpath', '//input[@name="username"]'):
-
+                if self.wait_until_element_found(5, 'xpath', '//input[@id="username"]'):
                     self.input_credentials(username, password)
-
-                    if self.wait_until_element_found(10, 'xpath', '//p[contains(text(), "Your login was successful.")]'):
-                        sleep(random.uniform(1, 5))
-                        self.browser.refresh()
-                        self.wait_until_browsing()
-                        logout_link = WebDriverWait(self.browser, 50).until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@href, "pkmslogout")]')))
-                        sleep(random.uniform(1, 5))
-                        logout_link.click()
-                    else:
-                        try:
-                            WebDriverWait(self.browser, 50).until(EC.presence_of_element_located((By.XPATH, '//select[@id="brands"]')))
+                    sleep(random.uniform(1, 5))
+                else:
+                    if self.wait_until_element_found(5, 'xpath', f'//span[contains(text(), "ACCT# {username}")]'):
+                        if self.wait_until_element_found(5, 'xpath', '//img[@class="home-asset-image"]'):
                             login_flag = True
-                        except Exception as e:
-                            self.print_logs(str(e))
-                            if self.DEBUG: print(str(e))
-                        
+                            break
+                        else:
+                            self.browser.refresh()
+                            sleep(10)
+                            self.wait_until_browsing()
         except Exception as e:
             self.print_logs(f'Exception in login: {str(e)}')
             if self.DEBUG: print(f'Exception in login: {str(e)}')
@@ -153,13 +150,15 @@ class MyMarchon_Scraper:
 
     def input_credentials(self, username: str, password: str) -> None:
         try:
-            self.browser.find_element(By.XPATH, '//input[@name="username"]').send_keys(username)
             sleep(random.uniform(1, 5))
-            self.browser.find_element(By.XPATH, '//input[@name="password"]').send_keys(password)
+            self.browser.find_element(By.XPATH, '//input[@id="username"]').send_keys(username)
             sleep(random.uniform(1, 5))
-            button = WebDriverWait(self.browser, 50).until(EC.element_to_be_clickable((By.XPATH, '//button[@class="signInButton"]')))
+            self.browser.find_element(By.XPATH, '//input[@id="password"]').send_keys(password)
+            sleep(random.uniform(1, 5))
+            button = WebDriverWait(self.browser, 50).until(EC.element_to_be_clickable((By.XPATH, '//button[contains(@title, "Sign In")]')))
             sleep(random.uniform(1, 5))
             button.click()
+            sleep(10)
             self.wait_until_browsing()
         except Exception as e:
             if self.DEBUG: print(f'Exception in input_credentials: {e}')
@@ -186,52 +185,59 @@ class MyMarchon_Scraper:
         except: pass
         finally: return flag
 
-    def get_user_data(self) -> dict:
+    def get_authorization_token(self) -> str:
+        authorization_token = ''
+        try:
+            for request in self.browser.requests:
+                if request.response and 'authorization' in request.headers and 'Bearer' in request.headers.get('authorization'):
+                    authorization_token = request.headers.get('authorization')
+                    break
+        except Exception as e:
+            if self.DEBUG: print(f'Exception in get_authorization_token: {e}')
+            self.print_logs(f'Exception in get_authorization_token: {e}')
+        finally: return authorization_token
+
+    def get_user_data(self, auth_token: str, username: str, headers: dict) -> dict:
         user_data = dict()
         try:
-            doc_tree = html.fromstring(self.browser.page_source)
-            text = str(doc_tree.xpath('//script[contains(text(), ".identity")]/text()')[0]).strip()
-            match = re.search(r'window.identity\s*=\s*(.+?);', text)
-            if match:
-                user_data = json.loads(str(match.group(1)).replace("'", '"'))
+            API = 'https://api.mymarchon.com/OrganizationServicesWeb/getUserCredential2JS/invoke'
+            json_data = {
+                'userCredential': {
+                    'token': auth_token,
+                },
+                'userID': username,
+            }
+            response = requests.post( url=API, headers=headers, json=json_data, verify=False)
+            if response.status_code == 200: user_data = response.json().get('userCredential', {})
         except Exception as e:
             if self.DEBUG: print(f'Exception in get_user_data: {e}')
             self.print_logs(f'Exception in get_user_data: {e}')
         finally: return user_data
 
-    def get_cookies(self) -> dict:
-        cookies: dict = {}
-        try:
-            for browser_cookie in self.browser.get_cookies():
-                cookies[browser_cookie['name']] = browser_cookie['value']
-        except Exception as e:
-            if self.DEBUG: print(f'Exception in get_cookies: {e}')
-            self.print_logs(f'Exception in get_cookies: {e}')
-        finally: return cookies
-
-    def get_api_headers(self, cookies: dict) -> dict:
+    def get_api_headers(self, auth_token: str) -> dict:
         return {
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Connection': 'keep-alive',
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Origin': 'https://account.mymarchon.com',
-                'Referer': 'https://account.mymarchon.com/baw/MVP2/it/',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-                'sec-ch-ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                'x-dtpc': cookies.get('dtPC'),
-            }
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'en-US,en;q=0.9',
+            'authorization': auth_token,
+            'content-type': 'application/json',
+            'origin': 'https://account.mymarchon.com',
+            'priority': 'u=1, i',
+            'referer': 'https://account.mymarchon.com/',
+            'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+        }
     
-    def get_brand_url(self, brand_name: str) -> str:
+    def get_brand_url(self, brand_code: str) -> str:
         brand_url = ''
         try:
-            doc_tree = html.fromstring(self.browser.page_source)
-            brand_url = str(doc_tree.xpath(f'//a[text()="{brand_name}"]/@href')[0]).strip()
+            brand_url = f'https://account.mymarchon.com/it/#/it/brand-collection/{brand_code}/eyewear'
+            # doc_tree = html.fromstring(self.browser.page_source)
+            # brand_url = str(doc_tree.xpath(f'//a[text()="{brand_name}"]/@href')[0]).strip()
         except Exception as e:
             if self.DEBUG: print(f'Exception in get_brand_url: {e}')
             self.print_logs((f'Exception in get_brand_url: {e}'))
@@ -246,47 +252,62 @@ class MyMarchon_Scraper:
     def close_last_tab(self) -> None:
         self.browser.close()
         self.browser.switch_to.window(self.browser.window_handles[len(self.browser.window_handles) - 1])
- 
-    def get_brand_products(self, brand_code: str, user_data: dict, cookies: dict, headers: dict):
+
+    def get_brand_products(self, brand_code: str, auth_token: str, headers: dict, user_data: dict):
         brand_products_data = dict()
         try:
-            BRAND_API = 'https://account.mymarchon.com/baw/ProductCatologWebWeb/catalog/catalog'
-            json_data = { 
-                "userCredential":{
-                    "userID": user_data.get('userID'),
-                    "salesOrg": user_data.get('salesOrg'),
-                    "defaultSalesOrg": user_data.get('defaultSalesOrg'),
-                    "userType": user_data.get('userType'),
-                    "name": user_data.get('name'),
-                    "language": user_data.get('language'),
-                    "phoneExtension": user_data.get('phoneExtension'),
-                    "premierStatus": user_data.get('premierStatus'),
-                    "shipToNumber": user_data.get('shipToNumber'),
-                    "accountNumber": user_data.get('accountNumber'),
-                    "greenGrass": user_data.get('greenGrass'),
-                    "ftGreenGrass": user_data.get('ftGreenGrass'),
-                    "currencyCode": user_data.get('currencyCode'),
-                    "sunRx": user_data.get('sunRx'),
-                    "token": user_data.get('token'),
-                    "warrantyFeatureAvailable": user_data.get('warrantyFeatureAvailable'),
-                    "buyingGroup":  user_data.get('buyingGroup'),
-                    "mktProgram": user_data.get('mktProgram'),
-                    "custSalesArea": user_data.get('custSalesArea'),
-                    "relatedSoldTos": user_data.get('relatedSoldTos'),
-                    "isFirstTimeGreenGrass": False,
-                    "isGreenGrassAccount": False,
-                    "isEnrolledInSunRx": False,
-                    "isEnrolledInKaleyedoscope": False,
-                    "isTestAccount":False
+            BRAND_API = 'https://api.mymarchon.com/ProductCatologWebWeb/catalog/catalog'
+            json_data = {
+                'userCredential': {
+                    'userID': user_data.get('userID', ''),
+                    'salesOrg': user_data.get('salesOrg', ''),
+                    'defaultSalesOrg': user_data.get('salesOrg', ''),
+                    'userType': user_data.get('userType', ''),
+                    'name': user_data.get('name', ''),
+                    'language': user_data.get('language', ''),
+                    'phoneExtension': '',
+                    'premierStatus': '',
+                    'shipToNumber': '',
+                    'accountNumber': user_data.get('accountNumber', ''),
+                    'greenGrass': 'N',
+                    'ftGreenGrass': 'N',
+                    'currencyCode': 'EUR',
+                    'sunRx': 'N',
+                    'warrantyFeatureAvailable': True,
+                    'buyingGroup': True,
+                    'mktProgram': {
+                        'programName': '',
+                        'eligibility': '',
+                        'optInStatus': 'NULL',
+                        'autoShip': '',
                     },
-                "accountNumber": user_data.get('accountNumber'),
-                "salesOrg": user_data.get('salesOrg'),
-                "distChannel": "10",
-                "soldTo": user_data.get('accountNumber'),
-                "locale": "it_IT",
-                "brandCode": brand_code
+                    'custSalesArea': [
+                        {
+                            'custno': user_data.get('accountNumber', ''),
+                            'salesOrg': user_data.get('salesOrg', ''),
+                            'salesOrgDesc': 'Marchon Italia',
+                            'sapDivision': 99,
+                            'sapDivisionDesc': 'Common Division',
+                            'sapDistribution': 10,
+                            'sapDistributionDesc': 'Optical Provider',
+                        },
+                    ],
+                    'relatedSoldTos': [],
+                    'token': auth_token,
+                    'isFirstTimeGreenGrass': False,
+                    'isGreenGrassAccount': False,
+                    'isEnrolledInSunRx': False,
+                    'isEnrolledInKaleyedoscope': False,
+                    'isTestAccount': False,
+                },
+                'accountNumber': user_data.get('accountNumber', ''),
+                'salesOrg': user_data.get('salesOrg', ''),
+                'distChannel': 10,
+                'soldTo': user_data.get('accountNumber', ''),
+                'locale': user_data.get('language', ''),
+                'brandCode': brand_code,
             }
-            response = requests.post(url=BRAND_API, cookies=cookies, headers=headers, data=json.dumps(json_data), verify=False)
+            response = requests.post(url=BRAND_API, headers=headers, json=json_data, verify=False)
             if response.status_code == 200: brand_products_data = response.json()
         except Exception as e:
             if self.DEBUG: print(f'Exception in get_brand_data: {e}')
@@ -309,90 +330,108 @@ class MyMarchon_Scraper:
             self.print_logs(f'Exception in get_all_products_by_type: {e}')
         finally: return all_products_numbers
 
-    def scrape_product(self, style_name: str, brand_name:str, glasses_type: str, user_data: dict, cookies: dict, headers: dict) -> None:
+    def scrape_product(self, style_name: str, brand_name:str, glasses_type: str, auth_token: str, headers: dict, user_data: dict) -> None:
         try:
-            PRODUCT_API = 'https://account.mymarchon.com/baw/ProductCatologWebWeb/Frame/sku'
+            PRODUCT_API = 'https://api.mymarchon.com/ProductCatologWebWeb/Frame/sku'
             json_data = {
-                "userCredential":{
-                    "userID": user_data.get('userID'),
-                    "salesOrg": user_data.get('salesOrg'),
-                    "defaultSalesOrg": user_data.get('defaultSalesOrg'),
-                    "userType": user_data.get('userType'),
-                    "name": user_data.get('name'),
-                    "language": user_data.get('language'),
-                    "phoneExtension": user_data.get('phoneExtension'),
-                    "premierStatus": user_data.get('premierStatus'),
-                    "shipToNumber": user_data.get('shipToNumber'),
-                    "accountNumber": user_data.get('accountNumber'),
-                    "greenGrass": user_data.get('greenGrass'),
-                    "ftGreenGrass": user_data.get('ftGreenGrass'),
-                    "currencyCode": user_data.get('currencyCode'),
-                    "sunRx": user_data.get('sunRx'),
-                    "token": user_data.get('token'),
-                    "warrantyFeatureAvailable": user_data.get('warrantyFeatureAvailable'),
-                    "buyingGroup":  user_data.get('buyingGroup'),
-                    "mktProgram": user_data.get('mktProgram'),
-                    "custSalesArea": user_data.get('custSalesArea'),
-                    "relatedSoldTos": user_data.get('relatedSoldTos'),
-                    "isFirstTimeGreenGrass": False,
-                    "isGreenGrassAccount": False,
-                    "isEnrolledInSunRx": False,
-                    "isEnrolledInKaleyedoscope": False,
-                    "isTestAccount":False
+                'userCredential': {
+                    'userID': user_data.get('userID', ''),
+                    'salesOrg': user_data.get('salesOrg', ''),
+                    'defaultSalesOrg': user_data.get('salesOrg', ''),
+                    'userType': user_data.get('userType', ''),
+                    'name': user_data.get('name', ''),
+                    'language': user_data.get('language', ''),
+                    'phoneExtension': '',
+                    'premierStatus': '',
+                    'shipToNumber': '',
+                    'accountNumber': user_data.get('accountNumber', ''),
+                    'greenGrass': 'N',
+                    'ftGreenGrass': 'N',
+                    'currencyCode': 'EUR',
+                    'sunRx': 'N',
+                    'warrantyFeatureAvailable': True,
+                    'buyingGroup': True,
+                    'mktProgram': {
+                        'programName': '',
+                        'eligibility': '',
+                        'optInStatus': 'NULL',
+                        'autoShip': '',
+                    },
+                    'custSalesArea': [
+                        {
+                            'custno': user_data.get('accountNumber', ''),
+                            'salesOrg': user_data.get('salesOrg', ''),
+                            'salesOrgDesc': 'Marchon Italia',
+                            'sapDivision': 99,
+                            'sapDivisionDesc': 'Common Division',
+                            'sapDistribution': 10,
+                            'sapDistributionDesc': 'Optical Provider',
+                        },
+                    ],
+                    'relatedSoldTos': [],
+                    'token': auth_token,
+                    'isFirstTimeGreenGrass': False,
+                    'isGreenGrassAccount': False,
+                    'isEnrolledInSunRx': False,
+                    'isEnrolledInKaleyedoscope': False,
+                    'isTestAccount': False,
                 },
-                "accountNumber": user_data.get('accountNumber'),
-                "salesOrg": user_data.get('salesOrg'),
-                "distChannel": "10",
-                "currencyCode": "EUR",
-                "itemType": "FRAME",
-                "orderType": "RX",
-                "includeFrontAndTemples": "X",
-                "style": style_name
-                }
-            response = requests.post(url=PRODUCT_API, cookies=cookies, headers=headers, data=json.dumps(json_data), verify=False)
+                'accountNumber': user_data.get('accountNumber', ''),
+                'salesOrg': user_data.get('salesOrg', ''),
+                'distChannel': 10,
+                'currencyCode': 'EUR',
+                'itemType': 'FRAME',
+                'orderType': 'RX',
+                'includeFrontAndTemples': 'X',
+                'style': style_name,
+            }
+            
+            response = requests.post(url=PRODUCT_API,  headers=headers, json=json_data, verify=False)
             if response.status_code == 200:
                 product_data = response.json()
-                frame_codes_with_sizes = self.get_all_frame_codes_and_sizes(product_data)
-                if frame_codes_with_sizes:
-                    for frame_code_with_sizes in frame_codes_with_sizes:
-                        product = Product()
-                        product.brand = str(brand_name).strip().title()
-                        product.type = glasses_type
+                if 'skuDetail' in product_data:
+                    frame_codes_with_sizes = self.get_all_frame_codes_and_sizes(product_data)
+                    if frame_codes_with_sizes:
+                        for frame_code_with_sizes in frame_codes_with_sizes:
+                            product = Product()
+                            product.brand = str(brand_name).strip().title()
+                            product.type = glasses_type
 
-                        product.frame_code = frame_code_with_sizes.get('frame_code')
+                            product.frame_code = frame_code_with_sizes.get('frame_code')
 
-                        for skuDetail in product_data.get('skuDetail'):
-                            if skuDetail.get('itemType') == 'FRAME' and skuDetail.get('color') == product.frame_code:
-                                product.number = skuDetail.get('styleName') if 'styleName' in skuDetail else ''
-                                product.frame_color = skuDetail.get('familyColorDesc') if 'familyColorDesc' in skuDetail else ''
-
-                                metafields = Metafields()
-                                metafields.for_who = skuDetail.get('gender') if 'gender' in skuDetail else ''
-                                metafields.frame_material = skuDetail.get('planMaterial') if 'planMaterial' in skuDetail else ''
-                                metafields.img_url = skuDetail.get('colorImageURL') if 'colorImageURL' in skuDetail else ''
-                                if 'sku360Image' in skuDetail:
-                                    metafields.img_360_urls = [sku360Image.get('image') for sku360Image in skuDetail.get('sku360Image')]
-                                product.metafields = metafields
-
-                        for variant_list in frame_code_with_sizes.get('sizes'):
                             for skuDetail in product_data.get('skuDetail'):
-                                if skuDetail.get('itemType') == 'FRAME' and skuDetail.get('color') == product.frame_code and skuDetail.get('size') == variant_list:
-                                    variant = Variant()
-                                    variant.title = f'{product.number} {product.frame_code} {int(variant_list)}'
-                                    variant.size = str(int(variant_list))
-                                    variant.sku = str(variant.title).strip().replace(' ', '_')
-                                    # variant.inventory_quantity = skuDetail.get('availableQty')
-                                    variant.listing_price = str(skuDetail.get('msrp')).strip() if 'msrp' in skuDetail else ''
-                                    variant.wholesale_price = str(skuDetail.get('retail')).strip() if 'retail' in skuDetail else ''
-                                    variant.barcode_or_gtin = str(skuDetail.get('upcNumber')).strip() if 'upcNumber' in skuDetail else ''
-                                    # variant.weight = skuDetail.get('weight')
-                                    # variant.found_status = 1
-                                    product.variants.append(variant)
+                                if skuDetail.get('itemType') == 'FRAME' and skuDetail.get('color') == product.frame_code:
+                                    product.number = skuDetail.get('styleName') if 'styleName' in skuDetail else ''
+                                    product.frame_color = skuDetail.get('familyColorDesc') if 'familyColorDesc' in skuDetail else ''
 
-                        self.data.append(product)
+                                    metafields = Metafields()
+                                    metafields.for_who = skuDetail.get('gender') if 'gender' in skuDetail else ''
+                                    metafields.frame_material = skuDetail.get('planMaterial') if 'planMaterial' in skuDetail else ''
+                                    metafields.img_url = skuDetail.get('colorImageURL') if 'colorImageURL' in skuDetail else ''
+                                    if 'sku360Image' in skuDetail:
+                                        metafields.img_360_urls = [sku360Image.get('image') for sku360Image in skuDetail.get('sku360Image')]
+                                    product.metafields = metafields
+
+                            for variant_list in frame_code_with_sizes.get('sizes'):
+                                for skuDetail in product_data.get('skuDetail'):
+                                    if skuDetail.get('itemType') == 'FRAME' and skuDetail.get('color') == product.frame_code and skuDetail.get('size') == variant_list:
+                                        variant = Variant()
+                                        variant.title = f'{product.number} {product.frame_code} {int(variant_list)}'
+                                        variant.size = str(int(variant_list))
+                                        variant.sku = str(variant.title).strip().replace(' ', '_')
+                                        # variant.inventory_quantity = skuDetail.get('availableQty')
+                                        variant.listing_price = str(skuDetail.get('msrp')).strip() if 'msrp' in skuDetail else ''
+                                        variant.wholesale_price = str(skuDetail.get('retail')).strip() if 'retail' in skuDetail else ''
+                                        variant.barcode_or_gtin = str(skuDetail.get('upcNumber')).strip() if 'upcNumber' in skuDetail else ''
+                                        # variant.weight = skuDetail.get('weight')
+                                        # variant.found_status = 1
+                                        product.variants.append(variant)
+
+                            self.data.append(product)
+                    else:
+                        self.print_logs(f'No frame codes found for {style_name}')
                 else:
-                    self.print_logs(f'No frame codes found for {style_name}')
-                    
+                    self.print_logs(f'No skuDetail found for {style_name}')
         except Exception as e:
             if self.DEBUG: print(f'Exception in scrape_product_data: {e}')
             self.print_logs(f'Exception in scrape_product_data: {e}')
