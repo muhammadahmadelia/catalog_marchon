@@ -599,7 +599,7 @@ def read_data_from_json_file(DEBUG, result_filename: str):
                         image_attachment = download_image(img_url)
                         if image_attachment:
                             with open(image_filename, 'wb') as f: f.write(image_attachment)
-                            crop_downloaded_image(f'Images/{sku}.jpg')
+                            # crop_downloaded_image(f'Images/{sku}.jpg')
                     data.append([number, frame_code, frame_color, brand, sku, wholesale_price, listing_price, barcode_or_gtin])
 
                 printProgressBar(index + 1, len(json_data), prefix = 'Progress:', suffix = 'Complete', length = 50)
