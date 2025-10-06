@@ -54,7 +54,7 @@ class MyMarchon_Scraper:
                     
                     for brand_with_type in brands_with_types:
                         brand: str = brand_with_type['brand']
-                        brand_code: str = str(brand_with_type['code']).strip()
+                        brand_code: str = str(brand_with_type['code']).strip().upper()
                         
                         print(f'Brand: {brand}')
                         self.print_logs(f'Brand: {brand}')
@@ -64,11 +64,14 @@ class MyMarchon_Scraper:
                         self.print_logs(f'Brand URL: {brand_url}')
 
                         auth_token = self.get_authorization_token()
+                        self.print_logs(f'Authorization Token: {auth_token}')
 
                         
                         if auth_token:
                             headers = self.get_api_headers(auth_token)
+                            self.print_logs(f'Headers: {headers}')
                             user_data = self.get_user_data(auth_token, store.username, headers)
+                            self.print_logs(f'User Data: {user_data}')
                             brand_products_data = self.get_brand_products(brand_code, auth_token, headers, user_data)
                             for glasses_type in brand_with_type['glasses_type']:
                                 start_time = datetime.now()
@@ -307,8 +310,13 @@ class MyMarchon_Scraper:
                 'locale': user_data.get('language', ''),
                 'brandCode': brand_code,
             }
+            self.print_logs(f'API: {BRAND_API}')
+            self.print_logs(f'Payload: {json_data}')
             response = requests.post(url=BRAND_API, headers=headers, json=json_data, verify=False)
-            if response.status_code == 200: brand_products_data = response.json()
+            self.print_logs(f'Status Code: {response.status_code}')
+            if response.status_code == 200: 
+                brand_products_data = response.json()
+                self.print_logs(f'Brand Products Data: {brand_products_data}')
         except Exception as e:
             if self.DEBUG: print(f'Exception in get_brand_data: {e}')
             self.print_logs(f'Exception in get_brand_data: {e}')
@@ -322,7 +330,7 @@ class MyMarchon_Scraper:
             elif glasses_type == 'Sunglasses': what_to_check = ' Sun'
 
             for catalogStyle in brand_products_data.get('catalog').get('catalogStyle'):
-                if what_to_check in catalogStyle.get('styleSkus')[0].get('marketingGroupDescription'):
+                if str(what_to_check).strip().lower() in str(catalogStyle.get('styleSkus')[0].get('marketingGroupDescription')).strip().lower():
                     if catalogStyle.get('style') not in all_products_numbers: 
                             all_products_numbers.append(catalogStyle.get('style'))
         except Exception as e:
@@ -385,10 +393,13 @@ class MyMarchon_Scraper:
                 'includeFrontAndTemples': 'X',
                 'style': style_name,
             }
-            
+            self.print_logs(f'Product API: {PRODUCT_API}')
+            self.print_logs(f'Payload: {json_data}')
             response = requests.post(url=PRODUCT_API,  headers=headers, json=json_data, verify=False)
+            self.print_logs(f'Status Code: {response.status_code}')
             if response.status_code == 200:
                 product_data = response.json()
+                self.print_logs(f'Product Data for {style_name}: {product_data}')
                 if 'skuDetail' in product_data:
                     frame_codes_with_sizes = self.get_all_frame_codes_and_sizes(product_data)
                     if frame_codes_with_sizes:
